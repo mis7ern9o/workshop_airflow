@@ -164,8 +164,8 @@ def weather_dag():
         target = df_final['target']
 
         return {
-            'X':features, 
-            'y':target
+            'X': features,
+            'y': target
         }
 
     @task
@@ -176,8 +176,8 @@ def weather_dag():
         score_lr = compute_model_score(LinearRegression(), X, y)
         score_dt = compute_model_score(DecisionTreeRegressor(), X, y)
         return {
-            'score_lr':score_lr,
-            'score_dt':score_dt
+            'score_lr': score_lr,
+            'score_dt': score_dt
         }
     
     @task
