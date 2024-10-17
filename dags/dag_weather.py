@@ -18,47 +18,53 @@ from joblib import dump
     dag_id='weather',
     tags=['workshop', 'datascientest', 'airflow'],
     schedule_interval=None,
-    start_date=days_ago(0)
+    start_date=days_ago(0),
+    default_args={
+        'owner': 'airflow',
+        'retries': 1,
+        'retry_delay': timedelta(minutes=5)
+    }
 )
 
 def weather_dag():
 
     @task_group(group_id='weather_get_data')
-    @task 
-    def set_variables():
-        Variable.set(key='DATA_RAW_PATH', value='/app/raw_files')
-        Variable.set(key='DATA_CLEAN_PATH', value='/app/clean_data')
-        Variable.set(key='OPEN_WEATHER_API', value='ac929e0a4ea954a65769a23ded82409e')
-        Variable.set(key='CITY_LIST', Value="['paris', 'london', 'washington']")
-        Variable.set(key='OPEN_WEATHER_URL', Value='https://api.openweathermap.org/data/2.5/weather')
-        Variable.set(key='MODEL_PICKLE', Value='./app/model.pckl')
-        Variable.set(key='MODEL_BEST_PICKLE', Value='/app/clean_data/best_model.pickle')
+    def weather_get_data():
+        @task 
+        def set_variables():
+            Variable.set(key='DATA_RAW_PATH', value='/app/raw_files')
+            Variable.set(key='DATA_CLEAN_PATH', value='/app/clean_data')
+            Variable.set(key='OPEN_WEATHER_API', value='ac929e0a4ea954a65769a23ded82409e')
+            Variable.set(key='CITY_LIST', Value="['paris', 'london', 'washington']")
+            Variable.set(key='OPEN_WEATHER_URL', Value='https://api.openweathermap.org/data/2.5/weather')
+            Variable.set(key='MODEL_PICKLE', Value='./app/model.pckl')
+            Variable.set(key='MODEL_BEST_PICKLE', Value='/app/clean_data/best_model.pickle')
 
-    @task
-    def get_openweather_data():
-        city_list = ast.literal_eval(Variable.get('CITY_LIST'))
-        openweather_api = Variable.get('OPEN_WEATHER_API')
-        timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
-        all_weather_data = {}
+        @task
+        def get_openweather_data():
+            city_list = ast.literal_eval(Variable.get('CITY_LIST'))
+            openweather_api = Variable.get('OPEN_WEATHER_API')
+            timestamp = datetime.now().strftime("%Y-%m-%d %H:%M")
+            all_weather_data = {}
 
-        for city in city_list:        
-            response = requests.get(base_url, params=dict(q=city, APPID=openweather_api))
-            
-            if response.status_code == 200:
-                weather_data = response.json()
-                all_weather_data[city] = weather_data
-                print(f"Successfully fetched data for {city}")
-            else:
-                print(f"Failed to fetch data for {city}. Status code: {response.status_code}")
+            for city in city_list:        
+                response = requests.get(base_url, params=dict(q=city, APPID=openweather_api))
+                
+                if response.status_code == 200:
+                    weather_data = response.json()
+                    all_weather_data[city] = weather_data
+                    print(f"Successfully fetched data for {city}")
+                else:
+                    print(f"Failed to fetch data for {city}. Status code: {response.status_code}")
 
-        filename = f"{timestamp}.json"
-        filepath = os.path.join(Variable.get('DATA_RAW_PATH'), filename)
+            filename = f"{timestamp}.json"
+            filepath = os.path.join(Variable.get('DATA_RAW_PATH'), filename)
 
-        # Write the data to a JSON file
-        with open(filepath, 'w') as f:
-            json.dump(all_weather_data, f, indent=4)
+            # Write the data to a JSON file
+            with open(filepath, 'w') as f:
+                json.dump(all_weather_data, f, indent=4)
 
-    def transform_data_into_csv(n_files=None, filename='data.csv'):
+        def transform_data_into_csv(n_files=None, filename='data.csv'):
         parent_folder = Variable.get('DATA_RAW_PATH')
         target_folder = Variable.get('DATA_CLEAN_PATH')
         files = sorted(os.listdir(parent_folder), reverse=True)
@@ -86,43 +92,29 @@ def weather_dag():
 
         df.to_csv(os.path.join(target_folder, filename), index=False)
 
-    @task
-    def dashboard_data():
-        filename = 'data.csv'
-        transform_data_into_csv(n_files=20, filename=filename)
+        @task
+        def dashboard_data():
+            filename = 'data.csv'
+            transform_data_into_csv(n_files=20, filename=filename)
 
-    @task
-    def training_data():
-        filename = 'fulldata.csv'
-        transform_data_into_csv(n_files=None, filename=filename)
+        @task
+        def training_data():
+            filename = 'fulldata.csv'
+            transform_data_into_csv(n_files=None, filename=filename)
 
-    set_variables()>>get_openweather_data()>>dashboard_data()>>training_data()
+        set_variables()>>get_openweather_data()>>dashboard_data()>>training_data()
 
     @task_group(group_id='weather_model_train')
-    @task
-    def compute_model_score(model, X, y):
-        # computing cross val
-        cross_validation = cross_val_score(
-            model,
-            X,
-            y,
-            cv=3,
-            scoring='neg_mean_squared_error')
+    def weather_model_train():
+        def train_and_save_model(model, X, y):
+            path_to_model = Variable.get('MODEL_PICKLE')
+            # training the model
+            model.fit(X, y)
+            # saving model
+            print(str(model), 'saved at ', path_to_model)
+            dump(model, path_to_model)
 
-        model_score = cross_validation.mean()
-
-        return model_score
-
-    @task
-    def train_and_save_model(model, X, y):
-        path_to_model = Variable.get('MODEL_PICKLE')
-        # training the model
-        model.fit(X, y)
-        # saving model
-        print(str(model), 'saved at ', path_to_model)
-        dump(model, path_to_model)
-
-    def prepare_data():
+        def prepare_data():
         path_to_data = os.path.join(Variable.get('DATA_CLEAN_PATH'), 'fulldata.csv')
         # reading data
         df = pd.read_csv(path_to_data)
@@ -163,26 +155,42 @@ def weather_dag():
         features = df_final.drop(['target'], axis=1)
         target = df_final['target']
 
-        return {
-            'X': features,
-            'y': target
-        }
+        return features, target
 
-    @task
-    def compute_model():
+        def compute_model_score(model, X, y):
+        # computing cross val
+        cross_validation = cross_val_score(
+            model,
+            X,
+            y,
+            cv=3,
+            scoring='neg_mean_squared_error')
+
+        model_score = cross_validation.mean()
+
+        return model_score
+
+        @task
+        def compute_model(**kwargs):
 
         X, y = prepare_data()
 
         score_lr = compute_model_score(LinearRegression(), X, y)
         score_dt = compute_model_score(DecisionTreeRegressor(), X, y)
-        return {
-            'score_lr': score_lr,
-            'score_dt': score_dt
-        }
-    
-    @task
-    def score_model():
+        kwargs['ti'].xcom_push(key='score_lr', value=score_lr)
+        kwargs['ti'].xcom_push(key='score_dt', value=score_dt)
+        kwargs['ti'].xcom_push(key='X', value=X)
+        kwargs['ti'].xcom_push(key='y', value=y)
+
+        @task
+        def score_model(**kwargs):
         # using neg_mean_square_error
+        score_lr = kwargs['ti'].xcom_pull(key='score_lr', task_ids='compute_model')
+        score_dt = kwargs['ti'].xcom_pull(key='score_dt', task_ids='compute_model')
+        X = kwargs['ti'].xcom_pull(key='X', task_ids='compute_model')
+        y = kwargs['ti'].xcom_pull(key='y', task_ids='compute_model')
+
+
         if score_lr < score_dt:
             train_and_save_model(
                 LinearRegression(),
@@ -197,5 +205,7 @@ def weather_dag():
                 y,
                 Variable.get('MODEL_BEST_PICKLE')
             )
+        
+        compute_model()>>score_model()
 
-    
+    weather_get_data()>>weather_model_train()
