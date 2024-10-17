@@ -18,7 +18,9 @@ from joblib import dump
     dag_id='weather',
     tags=['workshop', 'datascientest', 'airflow'],
     schedule_interval=None,
+    schedule_interval='0 * * * *',
     start_date=days_ago(0),
+    catchup=False,
     default_args={
         'owner': 'airflow',
         'retries': 1,
