@@ -15,6 +15,7 @@ from sklearn.linear_model import LinearRegression
 from sklearn.tree import DecisionTreeRegressor
 from joblib import dump
 
+
 @dag(
     dag_id='weather',
     tags=['workshop', 'datascientest', 'airflow'],
@@ -40,7 +41,7 @@ def weather_dag():
             Variable.set(key='CITY_LIST', value="['paris', 'london', 'washington']")
             Variable.set(key='OPEN_WEATHER_URL', value='https://api.openweathermap.org/data/2.5/weather')
             Variable.set(key='MODEL_PICKLE', value='./app/model.pckl')
-            Variable.set(key='MODEL_BEST_PICKLE', value='/app/clean_data/best_model.pickle')
+            #Variable.set(key='MODEL_BEST_PICKLE', value='/app/clean_data/best_model.pickle')
 
         @task
         def get_openweather_data():
@@ -108,9 +109,10 @@ def weather_dag():
         set_variables() >> get_openweather_data() >> dashboard_data() >> training_data()
 
     @task_group(group_id='weather_model_train')
+
+
     def weather_model_train():
-        def train_and_save_model(model, X, y):
-            path_to_model = Variable.get('MODEL_PICKLE')
+        def train_and_save_model(model, X, y, path_to_model='./app/model.pckl'):
             # training the model
             model.fit(X, y)
             # saving model
@@ -156,7 +158,11 @@ def weather_dag():
             df_final = pd.get_dummies(df_final)
 
             features = df_final.drop(['target'], axis=1)
+            print('----')
+            print(features.head(5))
             target = df_final['target']
+            print('----')
+            print(target.head(5))
 
             return features, target
 
@@ -174,44 +180,27 @@ def weather_dag():
             return model_score
 
         @task
-        def compute_model(**kwargs):
+        def compute_model():
             X, y = prepare_data()
 
             score_lr = compute_model_score(LinearRegression(), X, y)
             score_dt = compute_model_score(DecisionTreeRegressor(), X, y)
-            return {
-                'score_lr': score_lr,
-                'score_dt': score_dt,
-                'X': X,
-                'y': y
-            }
-
-        @task
-        def score_model(models):
-            # using neg_mean_square_error
-            score_lr = models['score_lr']
-            score_dt = models['score_dt']
-            X = models['X']
-            y = models['y']
-
 
             if score_lr < score_dt:
                 train_and_save_model(
                     LinearRegression(),
                     X,
                     y,
-                    Variable.get('MODEL_BEST_PICKLE')
+                    '/app/clean_data/best_model.pickle'
                 )
             else:
                 train_and_save_model(
                     DecisionTreeRegressor(),
                     X,
                     y,
-                    Variable.get('MODEL_BEST_PICKLE')
+                    '/app/clean_data/best_model.pickle'
                 )
-        compute_model_response = compute_model()
-        compute_model() >> score_model(compute_model_response)
-
+        compute_model()
     weather_get_data() >> weather_model_train()
 
 # Instantiate the DAG
