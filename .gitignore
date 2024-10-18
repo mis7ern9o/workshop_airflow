@@ -1,0 +1,4 @@
+logs/*
+dags/*
+!dags/dag_weather.py
+

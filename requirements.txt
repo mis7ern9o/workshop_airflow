@@ -3,3 +3,17 @@ requests
 pandas
 joblib
 ast
+
+        for city_data in data_temp:
+            # Ensure city_data is a dictionary and has the required keys
+            if isinstance(city_data, dict) and 'main' in city_data and 'name' in city_data:
+                main_data = city_data['main']
+                if isinstance(main_data, dict) and 'temp' in main_data and 'pressure' in main_data:
+                    dfs.append(
+                        {
+                            'temperature': main_data['temp'],
+                            'city': city_data['name'],
+                            'pression': main_data['pressure'],
+                            'date': f.split('.')[0]
+                        }
+                    )
